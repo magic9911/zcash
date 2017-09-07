@@ -29,7 +29,7 @@ public:
 protected:
     CBaseChainParams() {}
 
-    int nRPCPort = 0;
+    int nRPCPort;
     std::string strDataDir;
 };
 

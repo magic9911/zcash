@@ -35,6 +35,10 @@ uint256 static SignatureHashOld(CScript scriptCode, const CTransaction& txTo, un
     }
     CMutableTransaction txTmp(txTo);
 
+    // In case concatenating two scripts ends up with two codeseparators,
+    // or an extra one at the end, this prevents all those possible incompatibilities.
+    scriptCode.FindAndDelete(CScript(OP_CODESEPARATOR));
+
     // Blank out other inputs' signatures
     for (unsigned int i = 0; i < txTmp.vin.size(); i++)
         txTmp.vin[i].scriptSig = CScript();
@@ -87,7 +91,7 @@ uint256 static SignatureHashOld(CScript scriptCode, const CTransaction& txTo, un
 }
 
 void static RandomScript(CScript &script) {
-    static const opcodetype oplist[] = {OP_FALSE, OP_1, OP_2, OP_3, OP_CHECKSIG, OP_IF, OP_VERIF, OP_RETURN};
+    static const opcodetype oplist[] = {OP_FALSE, OP_1, OP_2, OP_3, OP_CHECKSIG, OP_IF, OP_VERIF, OP_RETURN, OP_CODESEPARATOR};
     script = CScript();
     int ops = (insecure_rand() % 10);
     for (int i=0; i<ops; i++)
@@ -237,14 +241,8 @@ BOOST_AUTO_TEST_CASE(sighash_from_data)
           stream >> tx;
 
           CValidationState state;
-          if (tx.nVersion < MIN_TX_VERSION) {
-              // Transaction must be invalid
-              BOOST_CHECK_MESSAGE(!CheckTransactionWithoutProofVerification(tx, state), strTest);
-              BOOST_CHECK(!state.IsValid());
-          } else {
-              BOOST_CHECK_MESSAGE(CheckTransactionWithoutProofVerification(tx, state), strTest);
-              BOOST_CHECK(state.IsValid());
-          }
+          BOOST_CHECK_MESSAGE(CheckTransactionWithoutProofVerification(tx, state), strTest);
+          BOOST_CHECK(state.IsValid());
 
           std::vector<unsigned char> raw = ParseHex(raw_script);
           scriptCode.insert(scriptCode.end(), raw.begin(), raw.end());

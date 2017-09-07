@@ -107,10 +107,9 @@ bool fPrintToDebugLog = true;
 bool fDaemon = false;
 bool fServer = false;
 string strMiscWarning;
-bool fLogTimestamps = DEFAULT_LOGTIMESTAMPS;
-bool fLogTimeMicros = DEFAULT_LOGTIMEMICROS;
-bool fLogIPs = DEFAULT_LOGIPS;
-std::atomic<bool> fReopenDebugLog(false);
+bool fLogTimestamps = false;
+bool fLogIPs = false;
+volatile bool fReopenDebugLog = false;
 CTranslationInterface translationInterface;
 
 /** Init OpenSSL library multithreading support */
@@ -479,6 +478,7 @@ const boost::filesystem::path &ZC_GetParamsDir()
         return path;
 
     path = ZC_GetBaseParamsDir();
+    path /= BaseParams().DataDir();
 
     return path;
 }

@@ -1,17 +1,20 @@
-Compiling/running automated tests
----------------------------------
+*** Warning: This document has not been updated for Zcash and may be inaccurate. ***
 
-Automated tests will be automatically compiled if dependencies were met in configure
+Compiling/running unit tests
+------------------------------------
+
+Unit tests will be automatically compiled if dependencies were met in configure
 and tests weren't explicitly disabled.
 
-There are two scripts for running tests:
+After configuring, they can be run with 'make check'.
 
-* ``qa/zcash/full-test-suite.sh``, to run the main test suite
-* ``qa/pull-tester/rpc-tests.sh``, to run the RPC tests.
+To run the bitcoind tests manually, launch src/test/test_bitcoin .
 
-The main test suite uses two different testing frameworks. Tests using the Boost
-framework are under ``src/test/``; tests using the Google Test/Google Mock
-framework are under ``src/gtest/`` and ``src/wallet/gtest/``. The latter framework
-is preferred for new Zcash unit tests.
+To add more bitcoind tests, add `BOOST_AUTO_TEST_CASE` functions to the existing
+.cpp files in the test/ directory or add new .cpp files that
+implement new BOOST_AUTO_TEST_SUITE sections.
 
-RPC tests are implemented in Python under the ``qa/rpc-tests/`` directory.
+To run the bitcoin-qt tests manually, launch src/qt/test/test_bitcoin-qt
+
+To add more bitcoin-qt tests, add them to the `src/qt/test/` directory and
+the `src/qt/test/test_main.cpp` file.

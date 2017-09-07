@@ -247,12 +247,13 @@ bool EvalScript(vector<vector<unsigned char> >& stack, const CScript& script, un
 
     CScript::const_iterator pc = script.begin();
     CScript::const_iterator pend = script.end();
+    CScript::const_iterator pbegincodehash = script.begin();
     opcodetype opcode;
     valtype vchPushValue;
     vector<bool> vfExec;
     vector<valtype> altstack;
     set_error(serror, SCRIPT_ERR_UNKNOWN_ERROR);
-    if (script.size() > MAX_SCRIPT_SIZE)
+    if (script.size() > 10000)
         return set_error(serror, SCRIPT_ERR_SCRIPT_SIZE);
     int nOpCount = 0;
     bool fRequireMinimal = (flags & SCRIPT_VERIFY_MINIMALDATA) != 0;
@@ -289,8 +290,7 @@ bool EvalScript(vector<vector<unsigned char> >& stack, const CScript& script, un
                 opcode == OP_DIV ||
                 opcode == OP_MOD ||
                 opcode == OP_LSHIFT ||
-                opcode == OP_RSHIFT ||
-                opcode == OP_CODESEPARATOR)
+                opcode == OP_RSHIFT)
                 return set_error(serror, SCRIPT_ERR_DISABLED_OPCODE); // Disabled opcodes.
 
             if (fExec && 0 <= opcode && opcode <= OP_PUSHDATA4) {
@@ -815,6 +815,13 @@ bool EvalScript(vector<vector<unsigned char> >& stack, const CScript& script, un
                     popstack(stack);
                     stack.push_back(vchHash);
                 }
+                break;                                   
+
+                case OP_CODESEPARATOR:
+                {
+                    // Hash starts after the code separator
+                    pbegincodehash = pc;
+                }
                 break;
 
                 case OP_CHECKSIG:
@@ -827,11 +834,17 @@ bool EvalScript(vector<vector<unsigned char> >& stack, const CScript& script, un
                     valtype& vchSig    = stacktop(-2);
                     valtype& vchPubKey = stacktop(-1);
 
+                    // Subset of script starting at the most recent codeseparator
+                    CScript scriptCode(pbegincodehash, pend);
+
+                    // Drop the signature, since there's no way for a signature to sign itself
+                    scriptCode.FindAndDelete(CScript(vchSig));
+
                     if (!CheckSignatureEncoding(vchSig, flags, serror) || !CheckPubKeyEncoding(vchPubKey, flags, serror)) {
                         //serror is set
                         return false;
                     }
-                    bool fSuccess = checker.CheckSig(vchSig, vchPubKey, script);
+                    bool fSuccess = checker.CheckSig(vchSig, vchPubKey, scriptCode);
 
                     popstack(stack);
                     popstack(stack);
@@ -874,6 +887,16 @@ bool EvalScript(vector<vector<unsigned char> >& stack, const CScript& script, un
                     if ((int)stack.size() < i)
                         return set_error(serror, SCRIPT_ERR_INVALID_STACK_OPERATION);
 
+                    // Subset of script starting at the most recent codeseparator
+                    CScript scriptCode(pbegincodehash, pend);
+
+                    // Drop the signatures, since there's no way for a signature to sign itself
+                    for (int k = 0; k < nSigsCount; k++)
+                    {
+                        valtype& vchSig = stacktop(-isig-k);
+                        scriptCode.FindAndDelete(CScript(vchSig));
+                    }
+
                     bool fSuccess = true;
                     while (fSuccess && nSigsCount > 0)
                     {
@@ -889,7 +912,7 @@ bool EvalScript(vector<vector<unsigned char> >& stack, const CScript& script, un
                         }
 
                         // Check signature
-                        bool fOk = checker.CheckSig(vchSig, vchPubKey, script);
+                        bool fOk = checker.CheckSig(vchSig, vchPubKey, scriptCode);
 
                         if (fOk) {
                             isig++;
@@ -975,12 +998,27 @@ public:
         fHashSingle((nHashTypeIn & 0x1f) == SIGHASH_SINGLE),
         fHashNone((nHashTypeIn & 0x1f) == SIGHASH_NONE) {}
 
-    /** Serialize the passed scriptCode */
+    /** Serialize the passed scriptCode, skipping OP_CODESEPARATORs */
     template<typename S>
     void SerializeScriptCode(S &s, int nType, int nVersion) const {
-        auto size = scriptCode.size();
-        ::WriteCompactSize(s, size);
-        s.write((char*)&scriptCode.begin()[0], size);
+        CScript::const_iterator it = scriptCode.begin();
+        CScript::const_iterator itBegin = it;
+        opcodetype opcode;
+        unsigned int nCodeSeparators = 0;
+        while (scriptCode.GetOp(it, opcode)) {
+            if (opcode == OP_CODESEPARATOR)
+                nCodeSeparators++;
+        }
+        ::WriteCompactSize(s, scriptCode.size() - nCodeSeparators);
+        it = itBegin;
+        while (scriptCode.GetOp(it, opcode)) {
+            if (opcode == OP_CODESEPARATOR) {
+                s.write((char*)&itBegin[0], it-itBegin-1);
+                itBegin = it;
+            }
+        }
+        if (itBegin != scriptCode.end())
+            s.write((char*)&itBegin[0], it-itBegin);
     }
 
     /** Serialize an input of txTo */

@@ -27,55 +27,54 @@
  * >> and << read and write unformatted data using the above serialization templates.
  * Fills with data in linear time; some stringstream implementations take N^2 time.
  */
-template<typename SerializeType>
-class CBaseDataStream
+class CDataStream
 {
 protected:
-    typedef SerializeType vector_type;
+    typedef CSerializeData vector_type;
     vector_type vch;
     unsigned int nReadPos;
 public:
     int nType;
     int nVersion;
 
-    typedef typename vector_type::allocator_type   allocator_type;
-    typedef typename vector_type::size_type        size_type;
-    typedef typename vector_type::difference_type  difference_type;
-    typedef typename vector_type::reference        reference;
-    typedef typename vector_type::const_reference  const_reference;
-    typedef typename vector_type::value_type       value_type;
-    typedef typename vector_type::iterator         iterator;
-    typedef typename vector_type::const_iterator   const_iterator;
-    typedef typename vector_type::reverse_iterator reverse_iterator;
+    typedef vector_type::allocator_type   allocator_type;
+    typedef vector_type::size_type        size_type;
+    typedef vector_type::difference_type  difference_type;
+    typedef vector_type::reference        reference;
+    typedef vector_type::const_reference  const_reference;
+    typedef vector_type::value_type       value_type;
+    typedef vector_type::iterator         iterator;
+    typedef vector_type::const_iterator   const_iterator;
+    typedef vector_type::reverse_iterator reverse_iterator;
 
-    explicit CBaseDataStream(int nTypeIn, int nVersionIn)
+    explicit CDataStream(int nTypeIn, int nVersionIn)
     {
         Init(nTypeIn, nVersionIn);
     }
 
-    CBaseDataStream(const_iterator pbegin, const_iterator pend, int nTypeIn, int nVersionIn) : vch(pbegin, pend)
+    CDataStream(const_iterator pbegin, const_iterator pend, int nTypeIn, int nVersionIn) : vch(pbegin, pend)
     {
         Init(nTypeIn, nVersionIn);
     }
 
 #if !defined(_MSC_VER) || _MSC_VER >= 1300
-    CBaseDataStream(const char* pbegin, const char* pend, int nTypeIn, int nVersionIn) : vch(pbegin, pend)
+    CDataStream(const char* pbegin, const char* pend, int nTypeIn, int nVersionIn) : vch(pbegin, pend)
     {
         Init(nTypeIn, nVersionIn);
     }
 #endif
 
-    CBaseDataStream(const vector_type& vchIn, int nTypeIn, int nVersionIn) : vch(vchIn.begin(), vchIn.end())
+    CDataStream(const vector_type& vchIn, int nTypeIn, int nVersionIn) : vch(vchIn.begin(), vchIn.end())
     {
         Init(nTypeIn, nVersionIn);
     }
 
-    CBaseDataStream(const std::vector<char>& vchIn, int nTypeIn, int nVersionIn) : vch(vchIn.begin(), vchIn.end())
+    CDataStream(const std::vector<char>& vchIn, int nTypeIn, int nVersionIn) : vch(vchIn.begin(), vchIn.end())
     {
         Init(nTypeIn, nVersionIn);
     }
 
-    CBaseDataStream(const std::vector<unsigned char>& vchIn, int nTypeIn, int nVersionIn) : vch(vchIn.begin(), vchIn.end())
+    CDataStream(const std::vector<unsigned char>& vchIn, int nTypeIn, int nVersionIn) : vch(vchIn.begin(), vchIn.end())
     {
         Init(nTypeIn, nVersionIn);
     }
@@ -87,15 +86,15 @@ public:
         nVersion = nVersionIn;
     }
 
-    CBaseDataStream& operator+=(const CBaseDataStream& b)
+    CDataStream& operator+=(const CDataStream& b)
     {
         vch.insert(vch.end(), b.begin(), b.end());
         return *this;
     }
 
-    friend CBaseDataStream operator+(const CBaseDataStream& a, const CBaseDataStream& b)
+    friend CDataStream operator+(const CDataStream& a, const CDataStream& b)
     {
-        CBaseDataStream ret = a;
+        CDataStream ret = a;
         ret += b;
         return (ret);
     }
@@ -208,7 +207,7 @@ public:
     // Stream subset
     //
     bool eof() const             { return size() == 0; }
-    CBaseDataStream* rdbuf()         { return this; }
+    CDataStream* rdbuf()         { return this; }
     int in_avail()               { return size(); }
 
     void SetType(int n)          { nType = n; }
@@ -218,7 +217,7 @@ public:
     void ReadVersion()           { *this >> nVersion; }
     void WriteVersion()          { *this << nVersion; }
 
-    CBaseDataStream& read(char* pch, size_t nSize)
+    CDataStream& read(char* pch, size_t nSize)
     {
         // Read from the beginning of the buffer
         unsigned int nReadPosNext = nReadPos + nSize;
@@ -226,7 +225,7 @@ public:
         {
             if (nReadPosNext > vch.size())
             {
-                throw std::ios_base::failure("CBaseDataStream::read(): end of data");
+                throw std::ios_base::failure("CDataStream::read(): end of data");
             }
             memcpy(pch, &vch[nReadPos], nSize);
             nReadPos = 0;
@@ -238,17 +237,15 @@ public:
         return (*this);
     }
 
-    CBaseDataStream& ignore(int nSize)
+    CDataStream& ignore(int nSize)
     {
         // Ignore from the beginning of the buffer
-        if (nSize < 0) {
-            throw std::ios_base::failure("CDataStream::ignore(): nSize negative");
-        }
+        assert(nSize >= 0);
         unsigned int nReadPosNext = nReadPos + nSize;
         if (nReadPosNext >= vch.size())
         {
             if (nReadPosNext > vch.size())
-                throw std::ios_base::failure("CBaseDataStream::ignore(): end of data");
+                throw std::ios_base::failure("CDataStream::ignore(): end of data");
             nReadPos = 0;
             vch.clear();
             return (*this);
@@ -257,7 +254,7 @@ public:
         return (*this);
     }
 
-    CBaseDataStream& write(const char* pch, size_t nSize)
+    CDataStream& write(const char* pch, size_t nSize)
     {
         // Write to the end of the buffer
         vch.insert(vch.end(), pch, pch + nSize);
@@ -280,7 +277,7 @@ public:
     }
 
     template<typename T>
-    CBaseDataStream& operator<<(const T& obj)
+    CDataStream& operator<<(const T& obj)
     {
         // Serialize to this stream
         ::Serialize(*this, obj, nType, nVersion);
@@ -288,7 +285,7 @@ public:
     }
 
     template<typename T>
-    CBaseDataStream& operator>>(T& obj)
+    CDataStream& operator>>(T& obj)
     {
         // Unserialize from this stream
         ::Unserialize(*this, obj, nType, nVersion);
@@ -299,30 +296,6 @@ public:
         data.insert(data.end(), begin(), end());
         clear();
     }
-};
-
-class CDataStream : public CBaseDataStream<CSerializeData>
-{
-public:
-    explicit CDataStream(int nTypeIn, int nVersionIn) : CBaseDataStream(nTypeIn, nVersionIn) { }
-
-    CDataStream(const_iterator pbegin, const_iterator pend, int nTypeIn, int nVersionIn) :
-            CBaseDataStream(pbegin, pend, nTypeIn, nVersionIn) { }
-
-#if !defined(_MSC_VER) || _MSC_VER >= 1300
-    CDataStream(const char* pbegin, const char* pend, int nTypeIn, int nVersionIn) :
-            CBaseDataStream(pbegin, pend, nTypeIn, nVersionIn) { }
-#endif
-
-    CDataStream(const vector_type& vchIn, int nTypeIn, int nVersionIn) :
-            CBaseDataStream(vchIn, nTypeIn, nVersionIn) { }
-
-    CDataStream(const std::vector<char>& vchIn, int nTypeIn, int nVersionIn) :
-            CBaseDataStream(vchIn, nTypeIn, nVersionIn) { }
-
-    CDataStream(const std::vector<unsigned char>& vchIn, int nTypeIn, int nVersionIn) :
-            CBaseDataStream(vchIn, nTypeIn, nVersionIn) { }
-
 };
 
 
@@ -405,20 +378,6 @@ public:
             throw std::ios_base::failure("CAutoFile::read: file handle is NULL");
         if (fread(pch, 1, nSize, file) != nSize)
             throw std::ios_base::failure(feof(file) ? "CAutoFile::read: end of file" : "CAutoFile::read: fread failed");
-        return (*this);
-    }
-
-    CAutoFile& ignore(size_t nSize)
-    {
-        if (!file)
-            throw std::ios_base::failure("CAutoFile::ignore: file handle is NULL");
-        unsigned char data[4096];
-        while (nSize > 0) {
-            size_t nNow = std::min<size_t>(nSize, sizeof(data));
-            if (fread(data, 1, nNow, file) != nNow)
-                throw std::ios_base::failure(feof(file) ? "CAutoFile::ignore: end of file" : "CAutoFile::read: fread failed");
-            nSize -= nNow;
-        }
         return (*this);
     }
 

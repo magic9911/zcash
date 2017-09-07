@@ -16,7 +16,6 @@
 #include "consensus/validation.h"
 #include "init.h"
 #include "merkleblock.h"
-#include "metrics.h"
 #include "net.h"
 #include "pow.h"
 #include "txdb.h"
@@ -39,7 +38,7 @@
 using namespace std;
 
 #if defined(NDEBUG)
-# error "Zcash cannot be compiled without assertions."
+# error "Bitcoin cannot be compiled without assertions."
 #endif
 
 /**
@@ -91,7 +90,7 @@ static void CheckBlockIndex();
 /** Constant stuff for coinbase transactions we create: */
 CScript COINBASE_FLAGS;
 
-const string strMessageMagic = "Zcash Signed Message:\n";
+const string strMessageMagic = "Bitcoin Signed Message:\n";
 
 // Internal stuff
 namespace {
@@ -565,7 +564,7 @@ bool AddOrphanTx(const CTransaction& tx, NodeId peer)
     // have been mined or received.
     // 10,000 orphans, each of which is at most 5,000 bytes big is
     // at most 500 megabytes of orphans:
-    unsigned int sz = tx.GetSerializeSize(SER_NETWORK, tx.nVersion);
+    unsigned int sz = tx.GetSerializeSize(SER_NETWORK, CTransaction::CURRENT_VERSION);
     if (sz > 5000)
     {
         LogPrint("mempool", "ignoring large orphan tx (size: %u, hash: %s)\n", sz, hash.ToString());
@@ -640,8 +639,18 @@ unsigned int LimitOrphanTxSize(unsigned int nMaxOrphans)
 
 bool IsStandardTx(const CTransaction& tx, string& reason)
 {
-    if (tx.nVersion > CTransaction::MAX_CURRENT_VERSION || tx.nVersion < CTransaction::MIN_CURRENT_VERSION) {
+    if (tx.nVersion > CTransaction::CURRENT_VERSION || tx.nVersion < 1) {
         reason = "version";
+        return false;
+    }
+
+    // Extremely large transactions with lots of inputs can cost the network
+    // almost as much to process as they cost the sender in fees, because
+    // computing signature hashes is O(ninputs*txsize). Limiting transactions
+    // to MAX_STANDARD_TX_SIZE mitigates CPU exhaustion attacks.
+    unsigned int sz = tx.GetSerializeSize(SER_NETWORK, CTransaction::CURRENT_VERSION);
+    if (sz >= MAX_STANDARD_TX_SIZE) {
+        reason = "tx-size";
         return false;
     }
 
@@ -834,11 +843,6 @@ unsigned int GetP2SHSigOpCount(const CTransaction& tx, const CCoinsViewCache& in
 
 bool CheckTransaction(const CTransaction& tx, CValidationState &state)
 {
-    // Don't count coinbase transactions because mining skews the count
-    if (!tx.IsCoinBase()) {
-        transactionsValidated.increment();
-    }
-
     if (!CheckTransactionWithoutProofVerification(tx, state)) {
         return false;
     } else {
@@ -857,12 +861,6 @@ bool CheckTransactionWithoutProofVerification(const CTransaction& tx, CValidatio
 {
     // Basic checks that don't depend on any context
 
-    // Check transaction version
-    if (tx.nVersion < MIN_TX_VERSION) {
-        return state.DoS(100, error("CheckTransaction(): version too low"),
-                         REJECT_INVALID, "bad-txns-version-too-low");
-    }
-
     // Transactions can contain empty `vin` and `vout` so long as
     // `vjoinsplit` is non-empty.
     if (tx.vin.empty() && tx.vjoinsplit.empty())
@@ -873,8 +871,7 @@ bool CheckTransactionWithoutProofVerification(const CTransaction& tx, CValidatio
                          REJECT_INVALID, "bad-txns-vout-empty");
 
     // Size limits
-    BOOST_STATIC_ASSERT(MAX_BLOCK_SIZE > MAX_TX_SIZE); // sanity
-    if (::GetSerializeSize(tx, SER_NETWORK, PROTOCOL_VERSION) > MAX_TX_SIZE)
+    if (::GetSerializeSize(tx, SER_NETWORK, PROTOCOL_VERSION) > MAX_BLOCK_SIZE)
         return state.DoS(100, error("CheckTransaction(): size limits failed"),
                          REJECT_INVALID, "bad-txns-oversize");
 
@@ -1958,7 +1955,7 @@ bool FindUndoPos(CValidationState &state, int nFile, CDiskBlockPos &pos, unsigne
 static CCheckQueue<CScriptCheck> scriptcheckqueue(128);
 
 void ThreadScriptCheck() {
-    RenameThread("zcash-scriptch");
+    RenameThread("bitcoin-scriptch");
     scriptcheckqueue.Thread();
 }
 
@@ -2045,12 +2042,8 @@ bool ConnectBlock(const CBlock& block, CValidationState& state, CBlockIndex* pin
     // Special case for the genesis block, skipping connection of its transactions
     // (its coinbase is unspendable)
     if (block.GetHash() == chainparams.GetConsensus().hashGenesisBlock) {
-        if (!fJustCheck) {
+        if (!fJustCheck)
             view.SetBestBlock(pindex->GetBlockHash());
-            // Before the genesis block, there was an empty tree
-            ZCIncrementalMerkleTree tree;
-            pindex->hashAnchor = tree.root();
-        }
         return true;
     }
 
@@ -2095,10 +2088,6 @@ bool ConnectBlock(const CBlock& block, CValidationState& state, CBlockIndex* pin
     // Construct the incremental merkle tree at the current
     // block position,
     auto old_tree_root = view.GetBestAnchor();
-    // saving the top anchor in the block index as we go.
-    if (!fJustCheck) {
-        pindex->hashAnchor = old_tree_root;
-    }
     ZCIncrementalMerkleTree tree;
     // This should never fail: we should always be able to get the root
     // that is on the tip of our chain
@@ -2946,11 +2935,6 @@ bool FindUndoPos(CValidationState &state, int nFile, CDiskBlockPos &pos, unsigne
 
 bool CheckBlockHeader(const CBlockHeader& block, CValidationState& state, bool fCheckPOW)
 {
-    // Check block version
-    if (block.nVersion < MIN_BLOCK_VERSION)
-        return state.DoS(100, error("CheckBlockHeader(): block version too low"),
-                         REJECT_INVALID, "version-too-low");
-
     // Check Equihash solution is valid
     if (fCheckPOW && !CheckEquihashSolution(&block, Params()))
         return state.DoS(100, error("CheckBlockHeader(): Equihash solution invalid"),
@@ -3100,15 +3084,13 @@ bool ContextualCheckBlock(const CBlock& block, CValidationState& state, CBlockIn
     }
 
     // Coinbase transaction must include an output sending 20% of
-    // the block reward to a founders reward script, until the last founders
-    // reward block is reached, with exception of the genesis block.
-    // The last founders reward block is defined as the block just before the
-    // first subsidy halving block, which occurs at halving_interval + slow_start_shift
-    if ((nHeight > 0) && (nHeight <= consensusParams.GetLastFoundersRewardBlockHeight())) {
+    // the block reward to `FOUNDERS_REWARD_SCRIPT` until the first
+    // subsidy halving block, with exception to the genesis block.
+    if ((nHeight > 0) && (nHeight < consensusParams.nSubsidyHalvingInterval)) {
         bool found = false;
 
         BOOST_FOREACH(const CTxOut& output, block.vtx[0].vout) {
-            if (output.scriptPubKey == Params().GetFoundersRewardScriptAtHeight(nHeight)) {
+            if (output.scriptPubKey == ParseHex(FOUNDERS_REWARD_SCRIPT)) {
                 if (output.nValue == (GetBlockSubsidy(nHeight, consensusParams) / 5)) {
                     found = true;
                     break;
@@ -4087,9 +4069,6 @@ string GetWarnings(string strFor)
             {
                 nPriority = alert.nPriority;
                 strStatusBar = alert.strStatusBar;
-                if (alert.nPriority >= ALERT_PRIORITY_SAFE_MODE) {
-                    strRPC = alert.strRPCError;
-                }
             }
         }
     }
@@ -4678,10 +4657,13 @@ bool static ProcessMessage(CNode* pfrom, string strCommand, CDataStream& vRecv, 
         bool fMissingInputs = false;
         CValidationState state;
 
-        pfrom->setAskFor.erase(inv.hash);
         mapAlreadyAskedFor.erase(inv);
 
-        if (!AlreadyHave(inv) && AcceptToMemoryPool(mempool, state, tx, true, &fMissingInputs))
+        // Check for recently rejected (and do other quick existence checks)
+        if (AlreadyHave(inv))
+            return true;
+
+        if (AcceptToMemoryPool(mempool, state, tx, true, &fMissingInputs))
         {
             mempool.check(pcoinsTip);
             RelayTransaction(tx);
@@ -4762,21 +4744,13 @@ bool static ProcessMessage(CNode* pfrom, string strCommand, CDataStream& vRecv, 
 
             if (pfrom->fWhitelisted) {
                 // Always relay transactions received from whitelisted peers, even
-                // if they were already in the mempool or rejected from it due
-                // to policy, allowing the node to function as a gateway for
-                // nodes hidden behind it.
+                // if they were rejected from the mempool, allowing the node to
+                // function as a gateway for nodes hidden behind it.
                 //
-                // Never relay transactions that we would assign a non-zero DoS
-                // score for, as we expect peers to do the same with us in that
-                // case.
-                int nDoS = 0;
-                if (!state.IsInvalid(nDoS) || nDoS == 0) {
-                    LogPrintf("Force relaying tx %s from whitelisted peer=%d\n", tx.GetHash().ToString(), pfrom->id);
-                    RelayTransaction(tx);
-                } else {
-                    LogPrintf("Not relaying invalid transaction %s from whitelisted peer=%d (%s (code %d))\n",
-                        tx.GetHash().ToString(), pfrom->id, state.GetRejectReason(), state.GetRejectCode());
-                }
+                // FIXME: This includes invalid transactions, which means a
+                // whitelisted peer could get us banned! We may want to change
+                // that.
+                RelayTransaction(tx);
             }
         }
         int nDoS = 0;
@@ -4884,14 +4858,6 @@ bool static ProcessMessage(CNode* pfrom, string strCommand, CDataStream& vRecv, 
     // the getaddr message mitigates the attack.
     else if ((strCommand == "getaddr") && (pfrom->fInbound))
     {
-        // Only send one GetAddr response per connection to reduce resource waste
-        //  and discourage addr stamping of INV announcements.
-        if (pfrom->fSentAddr) {
-            LogPrint("net", "Ignoring repeated \"getaddr\". peer=%d\n", pfrom->id);
-            return true;
-        }
-        pfrom->fSentAddr = true;
-
         pfrom->vAddrToSend.clear();
         vector<CAddress> vAddr = addrman.GetAddr();
         BOOST_FOREACH(const CAddress &addr, vAddr)
@@ -5107,12 +5073,8 @@ bool static ProcessMessage(CNode* pfrom, string strCommand, CDataStream& vRecv, 
         }
     }
 
-    else if (strCommand == "notfound") {
-        // We do not care about the NOTFOUND message, but logging an Unknown Command
-        // message would be undesirable as we transmit it ourselves.
-    }
-
-    else {
+    else
+    {
         // Ignore unknown commands for extensibility
         LogPrint("net", "Unknown command \"%s\" from peer=%d\n", SanitizeString(strCommand), pfrom->id);
     }
@@ -5489,9 +5451,6 @@ bool SendMessages(CNode* pto, bool fSendTrickle)
                     pto->PushMessage("getdata", vGetData);
                     vGetData.clear();
                 }
-            } else {
-                //If we're not going to ask, don't expect a response.
-                pto->setAskFor.erase(inv.hash);
             }
             pto->mapAskFor.erase(pto->mapAskFor.begin());
         }

@@ -41,7 +41,7 @@ void CUnsignedAlert::SetNull()
 
     strComment.clear();
     strStatusBar.clear();
-    strRPCError.clear();
+    strReserved.clear();
 }
 
 std::string CUnsignedAlert::ToString() const
@@ -66,7 +66,6 @@ std::string CUnsignedAlert::ToString() const
         "    nPriority    = %d\n"
         "    strComment   = \"%s\"\n"
         "    strStatusBar = \"%s\"\n"
-        "    strRPCError  = \"%s\"\n"
         ")\n",
         nVersion,
         nRelayUntil,
@@ -79,8 +78,7 @@ std::string CUnsignedAlert::ToString() const
         strSetSubVer,
         nPriority,
         strComment,
-        strStatusBar,
-        strRPCError);
+        strStatusBar);
 }
 
 void CAlert::SetNull()

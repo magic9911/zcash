@@ -1,45 +1,34 @@
 ---
-name: "zcash-1.0.0"
+name: "bitcoin-linux-0.11"
 enable_cache: true
-distro: "debian"
 suites:
-- "jessie"
+- "precise"
 architectures:
 - "amd64"
-packages:
-- "autoconf"
-- "automake"
-- "bsdmainutils"
-- "binutils-gold"
-- "ca-certificates"
-- "faketime"
+packages: 
 - "g++-multilib"
 - "git-core"
-- "libc6-dev"
-- "libtool"
-- "m4"
-- "ncurses-dev"
 - "pkg-config"
-- "python"
-- "unzip"
-- "wget"
-- "zlib1g-dev"
+- "autoconf2.13"
+- "libtool"
+- "automake"
+- "faketime"
+- "bsdmainutils"
+- "binutils-gold"
+- "libstdc++6-4.6-pic"
+reference_datetime: "2015-06-01 00:00:00"
 remotes:
-- "url": "https://github.com/zcash/zcash.git"
-  "dir": "zcash"
+- "url": "https://github.com/bitcoin/bitcoin.git"
+  "dir": "bitcoin"
 files: []
 script: |
   WRAP_DIR=$HOME/wrapped
-  HOSTS="x86_64-unknown-linux-gnu"
-  CONFIGFLAGS="--enable-glibc-back-compat --enable-reduce-exports --disable-bench --disable-gui-tests --with-gui=no --enable-hardening"
-  MAKEOPTS="V=1 NO_QT=1"
+  HOSTS="i686-pc-linux-gnu x86_64-unknown-linux-gnu"
+  CONFIGFLAGS="--enable-glibc-back-compat --enable-reduce-exports LDFLAGS=-static-libstdc++"
   FAKETIME_HOST_PROGS=""
-  FAKETIME_PROGS="date ar ranlib nm strip objcopy"
-  HOST_CFLAGS="-fwrapv -fno-strict-aliasing -Werror -g"
-  HOST_CXXFLAGS="-fwrapv -fno-strict-aliasing -Werror -g"
-  HOST_LDFLAGS=-static-libstdc++
+  FAKETIME_PROGS="date ar ranlib nm strip"
 
-  export QT_RCC_TEST=0
+  export QT_RCC_TEST=1
   export GZIP="-9n"
   export TAR_OPTIONS="--mtime="$REFERENCE_DATE\\\ $REFERENCE_TIME""
   export TZ="UTC"
@@ -51,58 +40,55 @@ script: |
     mkdir -p ${BASE_CACHE} ${SOURCES_PATH}
   fi
 
-  function create_global_faketime_wrappers {
+  # Create global faketime wrappers
   for prog in ${FAKETIME_PROGS}; do
     echo '#!/bin/bash' > ${WRAP_DIR}/${prog}
     echo "REAL=\`which -a ${prog} | grep -v ${WRAP_DIR}/${prog} | head -1\`" >> ${WRAP_DIR}/${prog}
-    echo 'export LD_PRELOAD=/usr/lib/x86_64-linux-gnu/faketime/libfaketime.so.1' >> ${WRAP_DIR}/${prog}
-    echo "export FAKETIME=\"$1\"" >> ${WRAP_DIR}/${prog}
+    echo 'export LD_PRELOAD=/usr/lib/faketime/libfaketime.so.1' >> ${WRAP_DIR}/${prog}
+    echo "export FAKETIME=\"${REFERENCE_DATETIME}\"" >> ${WRAP_DIR}/${prog}
     echo "\$REAL \$@" >> $WRAP_DIR/${prog}
     chmod +x ${WRAP_DIR}/${prog}
   done
-  }
 
-  function create_per-host_faketime_wrappers {
+  # Create per-host faketime wrappers
   for i in $HOSTS; do
     for prog in ${FAKETIME_HOST_PROGS}; do
         echo '#!/bin/bash' > ${WRAP_DIR}/${i}-${prog}
         echo "REAL=\`which -a ${i}-${prog} | grep -v ${WRAP_DIR}/${i}-${prog} | head -1\`" >> ${WRAP_DIR}/${i}-${prog}
-        echo 'export LD_PRELOAD=/usr/lib/x86_64-linux-gnu/faketime/libfaketime.so.1' >> ${WRAP_DIR}/${i}-${prog}
-        echo "export FAKETIME=\"$1\"" >> ${WRAP_DIR}/${i}-${prog}
+        echo 'export LD_PRELOAD=/usr/lib/faketime/libfaketime.so.1' >> ${WRAP_DIR}/${i}-${prog}
+        echo "export FAKETIME=\"${REFERENCE_DATETIME}\"" >> ${WRAP_DIR}/${i}-${prog}
         echo "\$REAL \$@" >> $WRAP_DIR/${i}-${prog}
         chmod +x ${WRAP_DIR}/${i}-${prog}
     done
   done
-  }
-
   export PATH=${WRAP_DIR}:${PATH}
 
-  # Faketime for depends so intermediate results are comparable
-  create_global_faketime_wrappers "2000-01-01 12:00:00"
-  create_per-host_faketime_wrappers "2000-01-01 12:00:00"
-
-  cd zcash
+  cd bitcoin
   BASEPREFIX=`pwd`/depends
   # Build dependencies for each host
   for i in $HOSTS; do
     make ${MAKEOPTS} -C ${BASEPREFIX} HOST="${i}"
   done
 
-  # Faketime for binaries
-  create_global_faketime_wrappers "${REFERENCE_DATETIME}"
-  create_per-host_faketime_wrappers "${REFERENCE_DATETIME}"
+  # Ubuntu precise hack: Not an issue in later versions.
+  # Precise's libstdc++.a is non-pic. There's an optional libstdc++6-4.6-pic
+  #   package which provides libstdc++_pic.a, but the linker can't find it.
+  # Symlink it to a path that will be included in our link-line so that the
+  # linker picks it up before the default libstdc++.a.
+  # This is only necessary for 64bit.
+  ln -s /usr/lib/gcc/x86_64-linux-gnu/4.6/libstdc++_pic.a ${BASEPREFIX}/x86_64-unknown-linux-gnu/lib/libstdc++.a
 
   # Create the release tarball using (arbitrarily) the first host
   ./autogen.sh
-  CONFIG_SITE=${BASEPREFIX}/`echo "${HOSTS}" | awk '{print $1;}'`/share/config.site ./configure --prefix=/
+  ./configure --prefix=${BASEPREFIX}/`echo "${HOSTS}" | awk '{print $1;}'`
   make dist
-  SOURCEDIST=`echo zcash-*.tar.gz`
+  SOURCEDIST=`echo bitcoin-*.tar.gz`
   DISTNAME=`echo ${SOURCEDIST} | sed 's/.tar.*//'`
   # Correct tar file order
   mkdir -p temp
   pushd temp
   tar xf ../$SOURCEDIST
-  find zcash* | sort | tar --no-recursion --mode='u+rw,go+r-w,a+X' --owner=0 --group=0 -c -T - | gzip -9n > ../$SOURCEDIST
+  find bitcoin-* | sort | tar --no-recursion --mode='u+rw,go+r-w,a+X' --owner=0 --group=0 -c -T - | gzip -9n > ../$SOURCEDIST
   popd
 
   ORIGPATH="$PATH"
@@ -115,23 +101,19 @@ script: |
     mkdir -p ${INSTALLPATH}
     tar --strip-components=1 -xf ../$SOURCEDIST
 
-    CONFIG_SITE=${BASEPREFIX}/${i}/share/config.site ./configure --prefix=/ --disable-ccache --disable-maintainer-mode --disable-dependency-tracking ${CONFIGFLAGS} CFLAGS="${HOST_CFLAGS}" CXXFLAGS="${HOST_CXXFLAGS}" LDFLAGS="${HOST_LDFLAGS}"
+    ./configure --prefix=${BASEPREFIX}/${i} --bindir=${INSTALLPATH}/bin --includedir=${INSTALLPATH}/include --libdir=${INSTALLPATH}/lib --disable-ccache --disable-maintainer-mode --disable-dependency-tracking ${CONFIGFLAGS}
     make ${MAKEOPTS}
     make ${MAKEOPTS} -C src check-security
-    make install DESTDIR=${INSTALLPATH}
+    make install-strip
     cd installed
     find . -name "lib*.la" -delete
     find . -name "lib*.a" -delete
     rm -rf ${DISTNAME}/lib/pkgconfig
-    find ${DISTNAME}/bin -type f -executable -exec objcopy --only-keep-debug {} {}.dbg \; -exec strip -s {} \; -exec objcopy --add-gnu-debuglink={}.dbg {} \;
-    find ${DISTNAME}/lib -type f -exec objcopy --only-keep-debug {} {}.dbg \; -exec strip -s {} \; -exec objcopy --add-gnu-debuglink={}.dbg {} \;
-    find ${DISTNAME} -not -name "*.dbg" | sort | tar --no-recursion --mode='u+rw,go+r-w,a+X' --owner=0 --group=0 -c -T - | gzip -9n > ${OUTDIR}/${DISTNAME}-${i}.tar.gz
-    find ${DISTNAME} -name "*.dbg" | sort | tar --no-recursion --mode='u+rw,go+r-w,a+X' --owner=0 --group=0 -c -T - | gzip -9n > ${OUTDIR}/${DISTNAME}-${i}-debug.tar.gz
+    find ${DISTNAME} | sort | tar --no-recursion --mode='u+rw,go+r-w,a+X' --owner=0 --group=0 -c -T - | gzip -9n > ${OUTDIR}/${DISTNAME}-${i}.tar.gz
     cd ../../
-    rm -rf distsrc-${i}
   done
   mkdir -p $OUTDIR/src
   mv $SOURCEDIST $OUTDIR/src
-  mv ${OUTDIR}/${DISTNAME}-x86_64-*-debug.tar.gz ${OUTDIR}/${DISTNAME}-linux64-debug.tar.gz
   mv ${OUTDIR}/${DISTNAME}-x86_64-*.tar.gz ${OUTDIR}/${DISTNAME}-linux64.tar.gz
+  mv ${OUTDIR}/${DISTNAME}-i686-*.tar.gz ${OUTDIR}/${DISTNAME}-linux32.tar.gz
 

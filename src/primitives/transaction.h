@@ -7,11 +7,9 @@
 #define BITCOIN_PRIMITIVES_TRANSACTION_H
 
 #include "amount.h"
-#include "random.h"
 #include "script/script.h"
 #include "serialize.h"
 #include "uint256.h"
-#include "consensus/consensus.h"
 
 #include <boost/array.hpp>
 
@@ -54,7 +52,7 @@ public:
     // These contain trapdoors, values and other information
     // that the recipient needs, including a memo field. It
     // is encrypted using the scheme implemented in crypto/NoteEncryption.cpp
-    boost::array<ZCNoteEncryption::Ciphertext, ZC_NUM_JS_OUTPUTS> ciphertexts = {{ {{0}} }};
+    boost::array<ZCNoteEncryption::Ciphertext, ZC_NUM_JS_OUTPUTS> ciphertexts;
 
     // Random seed
     uint256 randomSeed;
@@ -78,20 +76,6 @@ public:
             CAmount vpub_old,
             CAmount vpub_new,
             bool computeProof = true // Set to false in some tests
-    );
-
-    static JSDescription Randomized(
-            ZCJoinSplit& params,
-            const uint256& pubKeyHash,
-            const uint256& rt,
-            boost::array<libzcash::JSInput, ZC_NUM_JS_INPUTS>& inputs,
-            boost::array<libzcash::JSOutput, ZC_NUM_JS_OUTPUTS>& outputs,
-            boost::array<size_t, ZC_NUM_JS_INPUTS>& inputMap,
-            boost::array<size_t, ZC_NUM_JS_OUTPUTS>& outputMap,
-            CAmount vpub_old,
-            CAmount vpub_new,
-            bool computeProof = true, // Set to false in some tests
-            std::function<int(int)> gen = GetRandInt
     );
 
     // Verifies that the JoinSplit proof is correct.
@@ -310,12 +294,7 @@ private:
 public:
     typedef boost::array<unsigned char, 64> joinsplit_sig_t;
 
-    // Transactions that include a list of JoinSplits are version 2.
-    static const int32_t MIN_CURRENT_VERSION = 1;
-    static const int32_t MAX_CURRENT_VERSION = 2;
-
-    static_assert(MIN_CURRENT_VERSION >= MIN_TX_VERSION,
-                  "standard rule for tx version should be consistent with network rule");
+    static const int32_t CURRENT_VERSION=1;
 
     // The local variables are made const to prevent unintended modification
     // without updating the cached hash value. However, CTransaction is not
@@ -328,7 +307,7 @@ public:
     const uint32_t nLockTime;
     const std::vector<JSDescription> vjoinsplit;
     const uint256 joinSplitPubKey;
-    const joinsplit_sig_t joinSplitSig = {{0}};
+    const joinsplit_sig_t joinSplitSig;
 
     /** Construct a CTransaction that qualifies as IsNull() */
     CTransaction();
@@ -407,7 +386,7 @@ struct CMutableTransaction
     uint32_t nLockTime;
     std::vector<JSDescription> vjoinsplit;
     uint256 joinSplitPubKey;
-    CTransaction::joinsplit_sig_t joinSplitSig = {{0}};
+    CTransaction::joinsplit_sig_t joinSplitSig;
 
     CMutableTransaction();
     CMutableTransaction(const CTransaction& tx);

@@ -172,6 +172,5 @@ public:
 
 typedef std::vector<unsigned char, secure_allocator<unsigned char> > CKeyingMaterial;
 typedef std::map<CKeyID, std::pair<CPubKey, std::vector<unsigned char> > > CryptedKeyMap;
-typedef std::map<libzcash::PaymentAddress, std::vector<unsigned char> > CryptedSpendingKeyMap;
 
 #endif // BITCOIN_KEYSTORE_H

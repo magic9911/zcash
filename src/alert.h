@@ -44,7 +44,7 @@ public:
     // Actions
     std::string strComment;
     std::string strStatusBar;
-    std::string strRPCError;
+    std::string strReserved;
 
     ADD_SERIALIZE_METHODS;
 
@@ -64,7 +64,7 @@ public:
 
         READWRITE(LIMITED_STRING(strComment, 65536));
         READWRITE(LIMITED_STRING(strStatusBar, 256));
-        READWRITE(LIMITED_STRING(strRPCError, 256));
+        READWRITE(LIMITED_STRING(strReserved, 256));
     }
 
     void SetNull();

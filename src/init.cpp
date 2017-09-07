@@ -16,7 +16,6 @@
 #include "consensus/validation.h"
 #include "key.h"
 #include "main.h"
-#include "metrics.h"
 #include "miner.h"
 #include "net.h"
 #include "rpcserver.h"
@@ -111,7 +110,7 @@ CClientUIInterface uiInterface; // Declared but not defined in ui_interface.h
 // shutdown thing.
 //
 
-std::atomic<bool> fRequestShutdown(false);
+volatile bool fRequestShutdown = false;
 
 void StartShutdown()
 {
@@ -157,7 +156,7 @@ void Shutdown()
     /// for example if the data directory was found to be locked.
     /// Be sure that anything that writes files or flushes caches only does this if the respective
     /// module was initialized.
-    RenameThread("zcash-shutoff");
+    RenameThread("bitcoin-shutoff");
     mempool.AddTransactionsUpdated(1);
     StopRPCThreads();
 #ifdef ENABLE_WALLET
@@ -384,7 +383,6 @@ std::string HelpMessage(HelpMessageMode mode)
 #ifdef ENABLE_WALLET
     strUsage += HelpMessageOpt("-gen", strprintf(_("Generate coins (default: %u)"), 0));
     strUsage += HelpMessageOpt("-genproclimit=<n>", strprintf(_("Set the number of threads for coin generation if enabled (-1 = all cores, default: %d)"), 1));
-    strUsage += HelpMessageOpt("-equihashsolver=<name>", _("Specify the Equihash solver to be used if enabled (default: \"default\")"));
 #endif
     strUsage += HelpMessageOpt("-help-debug", _("Show all debugging options (usage: --help -help-debug)"));
     strUsage += HelpMessageOpt("-logips", strprintf(_("Include IP addresses in debug output (default: %u)"), 0));
@@ -531,14 +529,9 @@ void CleanupBlockRevFiles()
 
 void ThreadImport(std::vector<boost::filesystem::path> vImportFiles)
 {
-    RenameThread("zcash-loadblk");
+    RenameThread("bitcoin-loadblk");
     // -reindex
     if (fReindex) {
-#ifdef ENABLE_WALLET
-        if (pwalletMain) {
-            pwalletMain->ClearNoteWitnessCache();
-        }
-#endif
         CImportingNow imp;
         int nFile = 0;
         while (true) {
@@ -615,8 +608,8 @@ static void ZC_LoadParams()
     struct timeval tv_start, tv_end;
     float elapsed;
 
-    boost::filesystem::path pk_path = ZC_GetParamsDir() / "sprout-proving.key";
-    boost::filesystem::path vk_path = ZC_GetParamsDir() / "sprout-verifying.key";
+    boost::filesystem::path pk_path = ZC_GetParamsDir() / "z9-proving.key";
+    boost::filesystem::path vk_path = ZC_GetParamsDir() / "z9-verifying.key";
 
     pzcashParams = ZCJoinSplit::Unopened();
 
@@ -926,7 +919,7 @@ bool AppInit2(boost::thread_group& threadGroup, CScheduler& scheduler)
 
     // Sanity check
     if (!InitSanityCheck())
-        return InitError(_("Initialization sanity check failed. Zcash is shutting down."));
+        return InitError(_("Initialization sanity check failed. Bitcoin Core is shutting down."));
 
     std::string strDataDir = GetDataDir().string();
 #ifdef ENABLE_WALLET
@@ -942,9 +935,9 @@ bool AppInit2(boost::thread_group& threadGroup, CScheduler& scheduler)
     try {
         static boost::interprocess::file_lock lock(pathLockFile.string().c_str());
         if (!lock.try_lock())
-            return InitError(strprintf(_("Cannot obtain a lock on data directory %s. Zcash is probably already running."), strDataDir));
+            return InitError(strprintf(_("Cannot obtain a lock on data directory %s. Bitcoin Core is probably already running."), strDataDir));
     } catch(const boost::interprocess::interprocess_exception& e) {
-        return InitError(strprintf(_("Cannot obtain a lock on data directory %s. Zcash is probably already running.") + " %s.", strDataDir, e.what()));
+        return InitError(strprintf(_("Cannot obtain a lock on data directory %s. Bitcoin Core is probably already running.") + " %s.", strDataDir, e.what()));
     }
 
 #ifndef WIN32
@@ -953,7 +946,7 @@ bool AppInit2(boost::thread_group& threadGroup, CScheduler& scheduler)
     if (GetBoolArg("-shrinkdebugfile", !fDebug))
         ShrinkDebugFile();
     LogPrintf("\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n");
-    LogPrintf("Zcash version %s (%s)\n", FormatFullVersion(), CLIENT_DATE);
+    LogPrintf("Bitcoin version %s (%s)\n", FormatFullVersion(), CLIENT_DATE);
     LogPrintf("Using OpenSSL version %s\n", SSLeay_version(SSLEAY_VERSION));
 #ifdef ENABLE_WALLET
     LogPrintf("Using BerkeleyDB version %s\n", DbEnv::version(0, 0, 0));
@@ -975,14 +968,6 @@ bool AppInit2(boost::thread_group& threadGroup, CScheduler& scheduler)
     // Start the lightweight task scheduler thread
     CScheduler::Function serviceLoop = boost::bind(&CScheduler::serviceQueue, &scheduler);
     threadGroup.create_thread(boost::bind(&TraceThread<CScheduler::Function>, "scheduler", serviceLoop));
-
-    if ((chainparams.NetworkIDString() != "regtest") &&
-            GetBoolArg("-showmetrics", true) &&
-            !fPrintToConsole && !GetBoolArg("-daemon", false)) {
-        // Start the persistent metrics interface
-        ConnectMetricsScreen();
-        threadGroup.create_thread(&ThreadShowMetricsScreen);
-    }
 
     // Initialize Zcash circuit parameters
     ZC_LoadParams();
